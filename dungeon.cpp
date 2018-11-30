@@ -1,26 +1,3 @@
-/*
-Copyright (c) 2000-2012 Lee Thomason (www.grinninglizard.com)
-
-This software is provided 'as-is', without any express or implied 
-warranty. In no event will the authors be held liable for any 
-damages arising from the use of this software.
-
-Permission is granted to anyone to use this software for any 
-purpose, including commercial applications, and to alter it and 
-redistribute it freely, subject to the following restrictions:
-
-1. The origin of this software must not be misrepresented; you must 
-not claim that you wrote the original software. If you use this 
-software in a product, an acknowledgment in the product documentation 
-would be appreciated but is not required.
-
-2. Altered source versions must be plainly marked as such, and 
-must not be misrepresented as being the original software.
-
-3. This notice may not be removed or altered from any source 
-distribution.
-*/
-
 
 #define USE_PATHER
 
@@ -32,27 +9,15 @@ distribution.
 #include <vector>
 #include <iostream>
 
-#ifdef USE_PATHER
-
 #include "micropather.h"
+#include "singlemap.h"
+#include <iostream>
+#include "opencv2/opencv.hpp"
+
 using namespace micropather;
-#endif
+using namespace cv;
+using namespace std;
 
-
-const int MAPX = 30;
-const int MAPY = 10;
-const char gMap[MAPX*MAPY+1] =
-  //"012345678901234567890123456789"
-	"     |      |                |"
-	"     |      |----+    |      +"
-	"---+ +---DD-+      +--+--+    "
-	"   |                     +-- +"
-	"        +----+  +---+         "
-	"---+ +  D    D            |   "
-	"   | |  +----+    +----+  +--+"
-	"   D |            |    |      "
-	"   | +-------+  +-+    |--+   "
-	"---+                   |     +";
 
 class Dungeon
 #ifdef USE_PATHER
@@ -76,6 +41,12 @@ class Dungeon
 		pather = new MicroPather( this, 20 );	// Use a very small memory block to stress the pather
 	}
 
+    void SetStart(int x, int y) {
+        playerX = x;
+        playerY = y;
+        cout << "Start value: (" << x << "," << y << ") " << (int)SingleMapMat::get().GetSingleMap().at<uchar>(y, x) << endl;
+    }
+
 	virtual ~Dungeon() {
 		delete pather;
 	}
@@ -90,38 +61,23 @@ class Dungeon
 		#endif
 	}
 
-	void ToggleTouched() { 	showConsidered = !showConsidered; 
- 							pather->Reset();
-						  }
-
-	void ToggleDoor() 
-	{ 
-		doorsOpen = !doorsOpen; 
-	
-		#ifdef USE_PATHER
-		pather->Reset();
-
-		#endif	
-	}
-
 	int Passable( int nx, int ny ) 
 	{
-		if (    nx >= 0 && nx < MAPX 
-			 && ny >= 0 && ny < MAPY )
+        Mat world_map = SingleMapMat::get().GetSingleMap();
+		if (    nx >= 0 && nx < world_map.cols
+			 && ny >= 0 && ny < world_map.rows )
 		{
-			int index = ny*MAPX+nx;
-			char c = gMap[ index ];
-			if ( c == ' ' )
+			if (world_map.at<uchar>(ny, nx) == 0xFF)
 				return 1;
-			else if ( c == 'D' )
-				return 2;
 		}		
 		return 0;
 	}
 
 	int SetPos( int nx, int ny ) 
 	{
-		int result = 0;
+        cout << "Goal value: " << (int)SingleMapMat::get().GetSingleMap().at<uchar>(ny, nx) << endl;
+
+        int result = 0;
 		if ( Passable( nx, ny ) == 1 )
 		{
 			#ifdef USE_PATHER
@@ -145,63 +101,18 @@ class Dungeon
 		return result;
 	}
 
-	void Print() 
-	{
-		char buf[ MAPX+1 ];
-
-		MPVector< void* > stateVec;
-		
-		if ( showConsidered )
-			pather->StatesInPool( &stateVec );
-		printf( " doors %s\n", doorsOpen ? "open" : "closed" );
-		printf( " 0         10        20\n" );
-		printf( " 012345678901234567890123456789\n" );
-		for( int j=0; j<MAPY; ++j ) {
-			// Copy in the line.
-			memcpy( buf, &gMap[MAPX*j], MAPX+1 );
-			buf[MAPX]=0;
-
-			#ifdef USE_PATHER
-			unsigned k;
-			// Wildly inefficient demo code.
-			unsigned size = path.size();
-			for( k=0; k<size; ++k ) {
-				int x, y;
-				NodeToXY( path[k], &x, &y );
-				if ( y == j )
-					buf[x] = '0' + k%10;
-			}
-			if ( showConsidered )
-			{
-    			for( k=0; k<stateVec.size(); ++k ) {
-           			int x, y;
-    				NodeToXY( stateVec[k], &x, &y );
-    				if ( y == j )
-    					buf[x] = 'x';
-        		}     
-      		}  		
-			#endif
-			
-			// Insert the player
-			if ( j==playerY )
-				buf[playerX] = 'i';
-
-			printf( "%d%s\n", j%10, buf );
-		}
-	}
-
 #ifdef USE_PATHER
 
 	void NodeToXY( void* node, int* x, int* y ) 
 	{
 		intptr_t index = (intptr_t)node;
-		*y = index / MAPX;
-		*x = index - *y * MAPX;
+		*y = index / SingleMapMat::get().GetSingleMap().cols;
+		*x = index - *y * (SingleMapMat::get().GetSingleMap().rows);
 	}
 
 	void* XYToNode( int x, int y )
 	{
-		return (void*) ( y*MAPX + x );
+		return (void*) ( y*(SingleMapMat::get().GetSingleMap().cols) + x );
 	}
 		
 	
@@ -259,47 +170,34 @@ class Dungeon
 	}
 
 #endif
+
+    void ShowPath() {
+        Mat world_map = SingleMapMat::get().GetSingleMap();
+        cvtColor(world_map, world_map, CV_GRAY2BGR);
+        unsigned size = path.size();
+        for( int k=0; k<size; ++k ) {
+            int x, y;
+            NodeToXY(path[k], &x, &y);
+//            world_map.at<uchar>(y, x) = 128;
+            circle(world_map, Point(x,y), 1, Scalar(0, 255, 0), -1);
+        }
+        imshow("path", world_map);
+        waitKey();
+    }
 };
 
-int main( int /*argc*/, const char** /*argv*/ )
+int main()
 {
-	Dungeon dungeon;
-	bool done = false;
-	char buf[ 256 ];
+    Dungeon dungeon;
+    dungeon.SetStart(330, 630);
+    clock_t start, finish;
+    double totaltime;
+    start = clock();
+    dungeon.SetPos(50, 50); //end
+    finish    = clock();
+    totaltime = (double)(finish - start) / CLOCKS_PER_SEC;
+    cout << "use " << totaltime << " seconds to find a path." << endl;
 
-	while ( !done ) {
-		dungeon.Print();
-		printf( "\n# # to move, q to quit, r to redraw, d to toggle doors, t for touched\n" );
-		//gets( buf );
-		//printf( "\n" );
-
-		std::cin.getline( buf, 256 );
-
-		if ( *buf )
-		{
-			if ( buf[0] == 'q' ) {
-				done = true;
-			}
-			else if ( buf[0] == 'd' ) {
-				dungeon.ToggleDoor();
-				dungeon.ClearPath();
-			}
-			else if ( buf[0] == 't' ) {
-				dungeon.ToggleTouched();   
-			}    
-			else if ( buf[0] == 'r' ) {
-				dungeon.ClearPath();
-			}
-			else if ( isdigit( buf[0] ) ) {
-				int x, y;
-				sscanf( buf, "%d %d", &x, &y );	// sleazy, I know
-				dungeon.SetPos( x, y );
-			} 
-		}
-		else
-		{				
-			dungeon.ClearPath();
-		}
-	}
+    dungeon.ShowPath();
 	return 0;
 }
